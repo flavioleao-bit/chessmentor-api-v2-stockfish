@@ -2,91 +2,53 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from stockfish import Stockfish
-import os
-import subprocess
-import requests
-import zipfile
 import chess
 import chess.pgn
 import io
 
-app = FastAPI()
-
+app = FastAPI(
+    title="Chess Mentor API",
+    version="2.0.0",
+    servers=[
+        {"url": "https://chessmentor-api-v2-stockfish-1.onrender.com"}
+    ]
+)
 
 class PGNInput(BaseModel):
     pgn: str
-
 
 class AnalyzeInput(BaseModel):
     fen: str
     depth: int = 18
     multiPV: int = 10
 
-
 class OpeningInput(BaseModel):
     moves: list[str]
 
-
 class TablebaseInput(BaseModel):
     fen: str
-
 
 class SearchGamesInput(BaseModel):
     fen: str
     pattern: str
 
-
 class AnalyzePositionRequest(BaseModel):
     fen: str
-
 
 class MoveEvaluation(BaseModel):
     move: str
     centipawn: int | None = None
     mate: int | None = None
 
-
 class AnalyzePositionResponse(BaseModel):
     best_moves: list[MoveEvaluation]
-
-
-def ensure_stockfish():
-    os.makedirs("engine", exist_ok=True)
-    stockfish_path = "./engine/stockfish"
-
-    if not os.path.isfile(stockfish_path):
-        print("🔽 Baixando Stockfish...")
-        url = "https://stockfishchess.org/files/stockfish-ubuntu-x86-64-avx2.zip"
-        zip_path = "./engine/stockfish.zip"
-        extract_path = "./engine"
-
-        response = requests.get(url)
-        with open(zip_path, "wb") as f:
-            f.write(response.content)
-
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(extract_path)
-
-        for root, dirs, files in os.walk(extract_path):
-            for file in files:
-                if file.startswith("stockfish") and not file.endswith(".zip"):
-                    os.rename(os.path.join(root, file), stockfish_path)
-                    break
-
-        os.chmod(stockfish_path, 0o755)
-
-    return stockfish_path
-
 
 @app.post("/analyzePositionV2", response_model=AnalyzePositionResponse)
 def analyze_position_v2(request: AnalyzePositionRequest):
     try:
-        stockfish_path = ensure_stockfish()
-        stockfish = Stockfish(path=stockfish_path)
-
+        stockfish = Stockfish(path="/usr/games/stockfish")
         if not stockfish.is_fen_valid(request.fen):
             raise HTTPException(status_code=400, detail="FEN inválido")
-
         stockfish.set_fen_position(request.fen)
         stockfish.set_depth(15)
         stockfish.update_engine_parameters({
@@ -94,7 +56,6 @@ def analyze_position_v2(request: AnalyzePositionRequest):
             "Hash": 128,
             "MultiPV": 3
         })
-
         top_moves = stockfish.get_top_moves(3)
         response = [
             MoveEvaluation(
@@ -103,12 +64,9 @@ def analyze_position_v2(request: AnalyzePositionRequest):
                 mate=mv.get("Mate")
             ) for mv in top_moves
         ]
-
         return AnalyzePositionResponse(best_moves=response)
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/obter_estado_do_tabuleiro")
 def obter_estado_do_tabuleiro(data: PGNInput):
@@ -119,17 +77,14 @@ def obter_estado_do_tabuleiro(data: PGNInput):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erro ao processar PGN: {str(e)}")
 
-
 @app.post("/analyze")
 def analyze(data: AnalyzeInput):
     try:
-        stockfish_path = ensure_stockfish()
-        stockfish = Stockfish(path=stockfish_path, depth=data.depth, parameters={"MultiPV": data.multiPV})
+        stockfish = Stockfish(path="/usr/games/stockfish", depth=data.depth, parameters={"MultiPV": data.multiPV})
         stockfish.set_fen_position(data.fen)
         return {"analysis": stockfish.get_top_moves(data.multiPV)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/opening")
 def get_opening_stats(data: OpeningInput):
@@ -145,7 +100,6 @@ def get_opening_stats(data: OpeningInput):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/tablebase")
 def query_tablebase(data: TablebaseInput):
     try:
@@ -158,7 +112,6 @@ def query_tablebase(data: TablebaseInput):
             return {"status": "Tablebase not applicable: too many pieces"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/search_games")
 def search_model_games(data: SearchGamesInput):
